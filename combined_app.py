@@ -87,6 +87,7 @@ if page == "Admin":
     uploaded_pdf = st.file_uploader("Choose a PDF to Upload", type=["pdf"])
 
     if uploaded_pdf is not None and not st.session_state.upload_complete:
+        pdf_content = uploaded_pdf.read()
         destination_folders = []
         if upload_destination in ["Teacher", "Both"]:
             destination_folders.append(teacher_folder)
@@ -101,7 +102,7 @@ if page == "Admin":
                 st.warning(f"⚠️ The file '{uploaded_pdf.name}' already exists. Skipping upload.")
             else:
                 with open(pdf_path, "wb") as f:
-                    f.write(uploaded_pdf.read())
+                    f.write(pdf_content)
 
                 st.info(f"⏳ Processing {uploaded_pdf.name}... (This may take a while)")
 
