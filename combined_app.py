@@ -217,28 +217,99 @@ elif page == "User":
     # Step 4: Start Chat Interface
     st.subheader("Chat with Your PDFs")
     
-    # Allow users to query both their class-specific collection and general collection
-    if selected_class != "General":
-        search_general = st.checkbox("Also search General collection", value=True)
-    else:
-        search_general = False
+    # Reset QA agent if role or class changes
+    if "current_role" not in st.session_state or st.session_state.current_role != role or \
+       "current_class" not in st.session_state or st.session_state.current_class != selected_class:
+        if "qa_agent" in st.session_state:
+            del st.session_state.qa_agent
+        st.session_state.current_role = role
+        st.session_state.current_class = selected_class
     
     if "qa_agent" not in st.session_state:
         try:
-            # Initialize the QA agent by connecting to the ChromaDB collection(s)
-            if selected_class != "General" and search_general:
-                # Get the general collection name for this role
-                general_collection_name = get_collection_name("General", role)
-                # Initialize the QA agent with both collections
-                st.session_state.qa_agent = get_answer_from_pdfs([collection_name, general_collection_name])
-                st.info(f"Searching in both {selected_class} and General collections")
-            else:
-                # Just use the single collection
-                st.session_state.qa_agent = get_answer_from_pdfs([collection_name])
+            # Initialize collections list based on role
+            collections_to_search = []
+            
+            # Principal-specific access setup
+            if role == "Principal":
+                st.markdown("### 🔑 Principal Access Options")
+                st.write("As a Principal, you have access to all school materials.")
                 
-            if st.session_state.qa_agent is None:
-                st.error("Error: No valid data found in the collection(s) or an error occurred during initialization.")
+                # UI for Principal to configure which collections to search
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # Class-specific options
+                    st.subheader("Class Materials Access")
+                    search_selected_teacher = st.checkbox("Access Teacher materials for selected class", value=True)
+                    search_selected_student = st.checkbox("Access Student materials for selected class", value=True)
+                
+                with col2:
+                    # General options
+                    st.subheader("General Materials Access")
+                    search_general_teacher = st.checkbox("Access General Teacher materials", value=True)
+                    search_general_student = st.checkbox("Access General Student materials", value=True)
+                
+                # Option to include all classes
+                st.subheader("All School Materials")
+                include_all_classes = st.checkbox("Include materials from ALL classes", value=False)
+                
+                if include_all_classes:
+                    with st.expander("Select specific class materials to include"):
+                        # Allow selecting specific classes and roles to include
+                        for class_num in range(1, 11):
+                            class_name = f"Class {class_num}"
+                            if class_name != selected_class:  # Skip already selected class
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    include_teacher = st.checkbox(f"{class_name} Teacher materials", value=True)
+                                    if include_teacher:
+                                        collections_to_search.append(get_collection_name(class_name, "Teacher"))
+                                with col2:
+                                    include_student = st.checkbox(f"{class_name} Student materials", value=True)
+                                    if include_student:
+                                        collections_to_search.append(get_collection_name(class_name, "Student"))
+                
+                # Add selected class collections based on checkboxes
+                if selected_class != "General":
+                    if search_selected_teacher:
+                        collections_to_search.append(get_collection_name(selected_class, "Teacher"))
+                    if search_selected_student:
+                        collections_to_search.append(get_collection_name(selected_class, "Student"))
+                
+                # Add general collections based on checkboxes
+                if search_general_teacher:
+                    collections_to_search.append(get_collection_name("General", "Teacher"))
+                if search_general_student:
+                    collections_to_search.append(get_collection_name("General", "Student"))
+                
+                # Display selected collections
+                st.write(f"Searching across {len(collections_to_search)} collections:")
+                st.text(", ".join(collections_to_search))
+                
+            else:
+                # Regular user (Teacher or Student)
+                collections_to_search.append(collection_name)
+                
+                # Option to also search general collection
+                if selected_class != "General":
+                    search_general = st.checkbox("Also search General collection", value=True)
+                    if search_general:
+                        general_collection_name = get_collection_name("General", role)
+                        collections_to_search.append(general_collection_name)
+                        st.info(f"Searching in both {selected_class} and General collections")
+            
+            # Initialize the QA agent with selected collections
+            if collections_to_search:
+                st.session_state.qa_agent = get_answer_from_pdfs(collections_to_search)
+                
+                if st.session_state.qa_agent is None:
+                    st.error("Error: No valid data found in the selected collections.")
+                    st.stop()
+            else:
+                st.error("No collections selected for search. Please select at least one option.")
                 st.stop()
+                
         except Exception as e:
             st.error(f"An error occurred while initializing the QA agent: {e}")
             st.stop()
