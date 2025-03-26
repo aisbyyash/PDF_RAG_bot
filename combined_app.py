@@ -19,6 +19,14 @@ CLASS_FOLDERS = "classes"
 # Streamlit UI Configuration
 st.set_page_config(page_title="School PDF Q&A System", layout="wide")
 
+# Helper function to generate consistent collection names
+def get_collection_name(class_name, role):
+    if class_name == "General":
+        return f"general_{role.lower()}"
+    else:
+        class_number = class_name.split()[1]
+        return f"class_{class_number}_{role.lower()}"
+
 # Sidebar Navigation
 st.sidebar.title("Navigation")
 page = st.sidebar.radio("Go to", ["Admin", "User"])
@@ -60,8 +68,8 @@ if page == "Admin":
 
     # Define paths for Teacher/Student folders
     class_folder = os.path.join(CLASS_FOLDERS, f"class_{selected_class.split()[1]}") if "Class" in selected_class else os.path.join(CLASS_FOLDERS, "general")
-    teacher_folder = os.path.join(class_folder, f"{selected_class}_Teacher")
-    student_folder = os.path.join(class_folder, f"{selected_class}_Student")
+    teacher_folder = os.path.join(class_folder, "Teacher")
+    student_folder = os.path.join(class_folder, "Student")
 
     # Ensure folders exist
     os.makedirs(teacher_folder, exist_ok=True)
@@ -98,9 +106,10 @@ if page == "Admin":
                 st.info(f"⏳ Processing {uploaded_pdf.name}... (This may take a while)")
 
                 # ✅ Process PDFs and store in ChromaDB collections
-                role = "Teacher" if folder == teacher_folder else "Student"
-                process_all_pdfs(folder, role)  # Pass the folder and role to process_all_pdfs
-                st.success(f"✅ Uploaded & Processed {uploaded_pdf.name} in {upload_destination} folder.")
+                role = "teacher" if folder == teacher_folder else "student"
+                collection_name = get_collection_name(selected_class, role)
+                process_all_pdfs(folder, collection_name)  # Pass the folder and collection name to process_all_pdfs
+                st.success(f"✅ Uploaded & Processed {uploaded_pdf.name} into {collection_name} collection.")
 
         # ✅ Set upload complete flag to prevent rerun
         st.session_state.upload_complete = True
@@ -173,11 +182,8 @@ elif page == "User":
     class_options = [f"Class {i}" for i in range(1, 11)] + ["General"]
     selected_class = st.selectbox("Choose a class or general access:", class_options)
 
-    # Normalize the selected class to match collection names
-    if selected_class == "General":
-        collection_name = f"general_{role}"
-    else:
-        collection_name = f"class_{selected_class.split(' ')[1]}_{role}"
+    # Generate collection name using the helper function
+    collection_name = get_collection_name(selected_class, role)
 
     # Step 3: Password Authentication
     st.subheader("Enter Password to Proceed:")

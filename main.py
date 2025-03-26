@@ -37,8 +37,14 @@ def extract_text_with_ocr(pdf_path):
     text = "\n".join(pytesseract.image_to_string(image) for image in images)
     return text
 
-def process_all_pdfs(class_folder, role):
-    """Processes all PDFs in a class folder and creates a unified knowledge base."""
+def process_all_pdfs(class_folder, collection_name):
+    """
+    Processes all PDFs in a class folder and creates a unified knowledge base.
+    
+    Args:
+        class_folder (str): The folder containing PDFs to process
+        collection_name (str): The name of the collection to use in ChromaDB
+    """
     pdf_files = [f for f in os.listdir(class_folder) if f.endswith(".pdf")]
 
     if not pdf_files:
@@ -78,8 +84,7 @@ def process_all_pdfs(class_folder, role):
 
     chroma_client = chromadb.HttpClient(host=CHROMA_SERVER_HOST, port=CHROMA_SERVER_PORT)
 
-    # Create or get a collection for the class and role
-    collection_name = f"{os.path.basename(class_folder)}_{role}".replace(" ", "")
+    # Create or get a collection with the provided collection_name
     collection = chroma_client.get_or_create_collection(name=collection_name)
 
     # Add texts with metadata to the collection
@@ -119,6 +124,9 @@ class QAAgent:
 def get_answer_from_pdfs(collection_name):
     """
     Connects to a ChromaDB collection and initializes a QA agent.
+    
+    Args:
+        collection_name (str): The name of the ChromaDB collection to use
     """
     try:
         # Connect to ChromaDB
