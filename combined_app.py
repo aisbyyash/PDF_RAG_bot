@@ -110,6 +110,7 @@ if page == "Admin":
                 collection_name = get_collection_name(selected_class, role)
                 process_all_pdfs(folder, collection_name)  # Pass the folder and collection name to process_all_pdfs
                 st.success(f"✅ Uploaded & Processed {uploaded_pdf.name} into {collection_name} collection.")
+                f.close()
 
         # ✅ Set upload complete flag to prevent rerun
         st.session_state.upload_complete = True
