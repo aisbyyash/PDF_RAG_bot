@@ -136,46 +136,6 @@ def get_answer_from_pdfs(collection_names):
         # Use OpenAI embeddings
         embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY, model="text-embedding-3-large", dimensions=384)
 
-        if len(collection_names) == 1:
-            # Use a single collection
-            vectorstore = Chroma(client=chroma_client, collection_name=collection_names[0], embedding_function=embeddings)
-        else:
-            # Combine multiple collections into a single vectorstore
-            vectorstores = []
-            for collection_name in collection_names:
-                try:
-                    vs = Chroma(client=chroma_client, collection_name=collection_name, embedding_function=embeddings)
-                    vectorstores.append(vs)
-                except Exception as e:
-                    logging.warning(f"Could not load collection {collection_name}: {e}")
-            
-            # Use a combined retriever for multiple collections
-            from langchain.retrievers import EnsembleRetriever
-            retrievers = [vs.as_retriever(search_kwargs={"k": 2}) for vs in vectorstores if vs]
-            
-            if not retrievers:
-                raise ValueError("No valid collections found")
-                
-            if len(retrievers) == 1:
-                # If only one retriever is valid, use it directly
-                vectorstore = vectorstores[0]
-            else:
-                # Create an ensemble retriever
-                class EnsembleVectorStore:
-                    def __init__(self, retrievers):
-                        self.ensemble_retriever = EnsembleRetriever(
-                            retrievers=retrievers,
-                            weights=[1/len(retrievers)] * len(retrievers)
-                        )
-                    
-                    def as_retriever(self, search_kwargs=None):
-                        return self.ensemble_retriever
-                
-                vectorstore = EnsembleVectorStore(retrievers)
-
-        # Use ChatOpenAI for GPT-4
-        llm = ChatOpenAI(model="gpt-4o", temperature=0, api_key=OPENAI_API_KEY)
-
         # Define the prompt template
         prompt_template = """
         You are a highly accurate AI assistant that provides precise answers using ONLY the provided PDF documents.
@@ -194,10 +154,63 @@ def get_answer_from_pdfs(collection_names):
 
         PROMPT = PromptTemplate(template=prompt_template, input_variables=["context", "question", "document_names"])
 
-        # Initialize retriever
-        retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+        # Use ChatOpenAI for GPT-4
+        llm = ChatOpenAI(model="gpt-4o", temperature=0, api_key=OPENAI_API_KEY)
 
-        # Initialize QA chain
+        # Define common search parameters
+        SEARCH_K = 3
+        
+        # Handle single vs multiple collections
+        if len(collection_names) == 1:
+            # Simple case: just one collection
+            try:
+                vectorstore = Chroma(
+                    client=chroma_client, 
+                    collection_name=collection_names[0], 
+                    embedding_function=embeddings
+                )
+                retriever = vectorstore.as_retriever(search_kwargs={"k": SEARCH_K})
+            except Exception as e:
+                logging.error(f"Error loading collection {collection_names[0]}: {e}")
+                return None
+        else:
+            # Complex case: multiple collections to search
+            valid_retrievers = []
+            
+            # Load each collection and create a retriever
+            for collection_name in collection_names:
+                try:
+                    vs = Chroma(
+                        client=chroma_client, 
+                        collection_name=collection_name, 
+                        embedding_function=embeddings
+                    )
+                    # Use the same k value for consistency
+                    retriever = vs.as_retriever(search_kwargs={"k": SEARCH_K})
+                    valid_retrievers.append(retriever)
+                    logging.info(f"Successfully loaded collection: {collection_name}")
+                except Exception as e:
+                    logging.warning(f"Could not load collection {collection_name}: {e}")
+            
+            # Check if we have any valid retrievers
+            if not valid_retrievers:
+                logging.error("No valid collections found")
+                return None
+            
+            # If we only have one valid retriever, use it directly
+            if len(valid_retrievers) == 1:
+                retriever = valid_retrievers[0]
+                logging.info("Only one valid collection found, using it directly")
+            else:
+                # Create an ensemble retriever with equal weights
+                weights = [1.0 / len(valid_retrievers)] * len(valid_retrievers)
+                retriever = EnsembleRetriever(
+                    retrievers=valid_retrievers,
+                    weights=weights
+                )
+                logging.info(f"Created ensemble retriever with {len(valid_retrievers)} collections")
+
+        # Initialize QA chain with the appropriate retriever
         qa_chain = RetrievalQA.from_chain_type(
             llm=llm,
             chain_type="stuff",
