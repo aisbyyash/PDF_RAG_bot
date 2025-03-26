@@ -87,7 +87,9 @@ if page == "Admin":
     uploaded_pdf = st.file_uploader("Choose a PDF to Upload", type=["pdf"])
 
     if uploaded_pdf is not None and not st.session_state.upload_complete:
+        # Read the file content once
         pdf_content = uploaded_pdf.read()
+        
         destination_folders = []
         if upload_destination in ["Teacher", "Both"]:
             destination_folders.append(teacher_folder)
@@ -101,6 +103,7 @@ if page == "Admin":
             if os.path.exists(pdf_path):
                 st.warning(f"⚠️ The file '{uploaded_pdf.name}' already exists. Skipping upload.")
             else:
+                # Write the content to the file
                 with open(pdf_path, "wb") as f:
                     f.write(pdf_content)
 
@@ -111,7 +114,6 @@ if page == "Admin":
                 collection_name = get_collection_name(selected_class, role)
                 process_all_pdfs(folder, collection_name)  # Pass the folder and collection name to process_all_pdfs
                 st.success(f"✅ Uploaded & Processed {uploaded_pdf.name} into {collection_name} collection.")
-                f.close()
 
         # ✅ Set upload complete flag to prevent rerun
         st.session_state.upload_complete = True
@@ -214,12 +216,28 @@ elif page == "User":
 
     # Step 4: Start Chat Interface
     st.subheader("Chat with Your PDFs")
+    
+    # Allow users to query both their class-specific collection and general collection
+    if selected_class != "General":
+        search_general = st.checkbox("Also search General collection", value=True)
+    else:
+        search_general = False
+    
     if "qa_agent" not in st.session_state:
         try:
-            # Initialize the QA agent by connecting to the ChromaDB collection
-            st.session_state.qa_agent = get_answer_from_pdfs(collection_name)
+            # Initialize the QA agent by connecting to the ChromaDB collection(s)
+            if selected_class != "General" and search_general:
+                # Get the general collection name for this role
+                general_collection_name = get_collection_name("General", role)
+                # Initialize the QA agent with both collections
+                st.session_state.qa_agent = get_answer_from_pdfs([collection_name, general_collection_name])
+                st.info(f"Searching in both {selected_class} and General collections")
+            else:
+                # Just use the single collection
+                st.session_state.qa_agent = get_answer_from_pdfs([collection_name])
+                
             if st.session_state.qa_agent is None:
-                st.error("Error: No valid data found in the collection or an error occurred during initialization.")
+                st.error("Error: No valid data found in the collection(s) or an error occurred during initialization.")
                 st.stop()
         except Exception as e:
             st.error(f"An error occurred while initializing the QA agent: {e}")

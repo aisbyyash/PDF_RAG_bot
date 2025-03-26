@@ -9,6 +9,7 @@ from langchain_chroma import Chroma
 from langchain_openai import ChatOpenAI
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
+from langchain.retrievers import EnsembleRetriever
 from langchain_openai.embeddings import OpenAIEmbeddings
 import chromadb
 import streamlit as st
@@ -121,12 +122,12 @@ class QAAgent:
             logging.error(f"An error occurred while retrieving the answer: {e}")
             return "Error: Something went wrong while processing your question. Please try again later."
 
-def get_answer_from_pdfs(collection_name):
+def get_answer_from_pdfs(collection_names):
     """
-    Connects to a ChromaDB collection and initializes a QA agent.
+    Connects to ChromaDB collections and initializes a QA agent.
     
     Args:
-        collection_name (str): The name of the ChromaDB collection to use
+        collection_names (list): A list of ChromaDB collection names to use
     """
     try:
         # Connect to ChromaDB
@@ -135,8 +136,42 @@ def get_answer_from_pdfs(collection_name):
         # Use OpenAI embeddings
         embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY, model="text-embedding-3-large", dimensions=384)
 
-        # Initialize Chroma vector store
-        vectorstore = Chroma(client=chroma_client, collection_name=collection_name, embedding_function=embeddings)
+        if len(collection_names) == 1:
+            # Use a single collection
+            vectorstore = Chroma(client=chroma_client, collection_name=collection_names[0], embedding_function=embeddings)
+        else:
+            # Combine multiple collections into a single vectorstore
+            vectorstores = []
+            for collection_name in collection_names:
+                try:
+                    vs = Chroma(client=chroma_client, collection_name=collection_name, embedding_function=embeddings)
+                    vectorstores.append(vs)
+                except Exception as e:
+                    logging.warning(f"Could not load collection {collection_name}: {e}")
+            
+            # Use a combined retriever for multiple collections
+            from langchain.retrievers import EnsembleRetriever
+            retrievers = [vs.as_retriever(search_kwargs={"k": 2}) for vs in vectorstores if vs]
+            
+            if not retrievers:
+                raise ValueError("No valid collections found")
+                
+            if len(retrievers) == 1:
+                # If only one retriever is valid, use it directly
+                vectorstore = vectorstores[0]
+            else:
+                # Create an ensemble retriever
+                class EnsembleVectorStore:
+                    def __init__(self, retrievers):
+                        self.ensemble_retriever = EnsembleRetriever(
+                            retrievers=retrievers,
+                            weights=[1/len(retrievers)] * len(retrievers)
+                        )
+                    
+                    def as_retriever(self, search_kwargs=None):
+                        return self.ensemble_retriever
+                
+                vectorstore = EnsembleVectorStore(retrievers)
 
         # Use ChatOpenAI for GPT-4
         llm = ChatOpenAI(model="gpt-4o", temperature=0, api_key=OPENAI_API_KEY)
