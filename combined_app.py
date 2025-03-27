@@ -1,11 +1,13 @@
-__import__('pysqlite3')
-import sys
-sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+# __import__('pysqlite3')
+# import sys
+# sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 import streamlit as st
 import os
 import json
 import pandas as pd
 import logging
+import time
+from datetime import datetime
 from main import process_all_pdfs, get_answer_from_pdfs  # Import functions from main.py
 
 # Configure logging
@@ -27,6 +29,30 @@ def get_collection_name(class_name, role):
         class_number = class_name.split()[1]
         return f"class_{class_number}_{role.lower()}"
 
+# Helper function to get all PDFs in a folder
+def get_pdfs_in_folder(folder_path):
+    if not os.path.exists(folder_path):
+        return []
+    return [f for f in os.listdir(folder_path) if f.endswith(".pdf")]
+
+# Helper to get PDF file size and modification date
+def get_file_info(file_path):
+    if not os.path.exists(file_path):
+        return {"size": "N/A", "modified": "N/A"}
+    
+    size_bytes = os.path.getsize(file_path)
+    if size_bytes < 1024:
+        size_str = f"{size_bytes} bytes"
+    elif size_bytes < 1024 * 1024:
+        size_str = f"{size_bytes/1024:.1f} KB"
+    else:
+        size_str = f"{size_bytes/(1024*1024):.1f} MB"
+    
+    mod_time = os.path.getmtime(file_path)
+    mod_date = datetime.fromtimestamp(mod_time).strftime('%Y-%m-%d %H:%M')
+    
+    return {"size": size_str, "modified": mod_date}
+
 # Sidebar Navigation
 st.sidebar.title("Navigation")
 page = st.sidebar.radio("Go to", ["Admin", "User"])
@@ -47,10 +73,14 @@ if page == "Admin":
 
     if not st.session_state.admin_authenticated:
         st.subheader("🔑 Admin Login")
-        username = st.text_input("Username:")
-        password = st.text_input("Password:", type="password")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            username = st.text_input("Username:", placeholder="Enter admin username")
+        with col2:
+            password = st.text_input("Password:", type="password", placeholder="Enter admin password")
 
-        if st.button("Login"):
+        if st.button("Login", type="primary"):
             if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
                 st.session_state.admin_authenticated = True
                 st.success("✅ Login successful! Redirecting...")
@@ -61,111 +91,849 @@ if page == "Admin":
 
     # ✅ Admin Successfully Logged In - Show Dashboard Features
     st.sidebar.header("Admin Actions")
-
-    # Section 1: Manage PDFs
-    st.subheader("📂 Manage PDFs")
-    selected_class = st.selectbox("Select a Class", ["General"] + [f"Class {i}" for i in range(1, 11)])
-
+    admin_action = st.sidebar.selectbox(
+        "Select Action",
+        ["Dashboard Overview", "Manage PDFs", "Delete PDFs", "Manage Passwords", "Access Logs"]
+    )
+    
+    # Initialize class selection in session state if not present
+    if "selected_class" not in st.session_state:
+        st.session_state.selected_class = "General"
+    
+    # Class selector in sidebar that persists across all admin sections
+    st.sidebar.subheader("Select Class")
+    selected_class = st.sidebar.selectbox(
+        "Choose a class:",
+        ["General"] + [f"Class {i}" for i in range(1, 11)],
+        index=(["General"] + [f"Class {i}" for i in range(1, 11)]).index(st.session_state.selected_class)
+    )
+    
+    # Update session state
+    st.session_state.selected_class = selected_class
+    
     # Define paths for Teacher/Student folders
     class_folder = os.path.join(CLASS_FOLDERS, f"class_{selected_class.split()[1]}") if "Class" in selected_class else os.path.join(CLASS_FOLDERS, "general")
     teacher_folder = os.path.join(class_folder, "Teacher")
     student_folder = os.path.join(class_folder, "Student")
-
+    
     # Ensure folders exist
     os.makedirs(teacher_folder, exist_ok=True)
     os.makedirs(student_folder, exist_ok=True)
-
-    # Choose where to upload PDF
-    upload_destination = st.radio("Upload PDF to:", ["Teacher", "Student", "Both"])
-
-    # Prevent infinite rerun by tracking upload state
-    if "upload_complete" not in st.session_state:
-        st.session_state.upload_complete = False
-
-    # Upload a new PDF
-    st.subheader("📤 Upload a New PDF")
-    uploaded_pdf = st.file_uploader("Choose a PDF to Upload", type=["pdf"])
-
-    if uploaded_pdf is not None and not st.session_state.upload_complete:
-        # Read the file content once
-        pdf_content = uploaded_pdf.read()
+    
+    # Get PDF lists
+    teacher_pdfs = get_pdfs_in_folder(teacher_folder)
+    student_pdfs = get_pdfs_in_folder(student_folder)
+    
+    # -----------------------------
+    # DASHBOARD OVERVIEW SECTION
+    # -----------------------------
+    if admin_action == "Dashboard Overview":
+        st.header("📊 Dashboard Overview")
         
-        destination_folders = []
-        if upload_destination in ["Teacher", "Both"]:
-            destination_folders.append(teacher_folder)
-        if upload_destination in ["Student", "Both"]:
-            destination_folders.append(student_folder)
+        # Summary Statistics
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            total_classes = 11  # 10 classes + General
+            st.metric("Total Classes", total_classes)
+        
+        with col2:
+            # Count total PDFs across all classes
+            total_pdfs = 0
+            for class_name in ["General"] + [f"Class {i}" for i in range(1, 11)]:
+                class_path = os.path.join(CLASS_FOLDERS, f"class_{class_name.split()[1]}") if "Class" in class_name else os.path.join(CLASS_FOLDERS, "general")
+                teacher_path = os.path.join(class_path, "Teacher")
+                student_path = os.path.join(class_path, "Student")
+                
+                if os.path.exists(teacher_path):
+                    total_pdfs += len(get_pdfs_in_folder(teacher_path))
+                if os.path.exists(student_path):
+                    total_pdfs += len(get_pdfs_in_folder(student_path))
+            
+            st.metric("Total PDFs", total_pdfs)
+        
+        with col3:
+            # Current class PDFs
+            current_class_pdfs = len(teacher_pdfs) + len(student_pdfs)
+            st.metric(f"{selected_class} PDFs", current_class_pdfs)
 
-        for folder in destination_folders:
-            pdf_path = os.path.join(folder, uploaded_pdf.name)
+        # Add this after the Dashboard Overview metrics and before the file listing
 
-            # Prevent duplicate uploads
-            if os.path.exists(pdf_path):
-                st.warning(f"⚠️ The file '{uploaded_pdf.name}' already exists. Skipping upload.")
+        # Handle PDF viewer from dashboard
+        if hasattr(st.session_state, 'selected_pdf') and hasattr(st.session_state, 'selected_folder'):
+            selected_pdf = st.session_state.selected_pdf
+            selected_folder = st.session_state.selected_folder
+            
+            # Determine the folder path based on the selected folder
+            pdf_folder_path = teacher_folder if selected_folder == "Teacher" else student_folder
+            pdf_path = os.path.join(pdf_folder_path, selected_pdf)
+            file_info = get_file_info(pdf_path)
+            
+            # Use a cleaner title layout with back button directly in the header
+            col1, col2 = st.columns([5, 1])
+            with col1:
+                st.title(f"📄 {selected_pdf}")
+                st.caption(f"{selected_folder} Materials • {selected_class}")
+            with col2:
+                if st.button("Back to Files", type="primary", use_container_width=True):
+                    del st.session_state.selected_pdf
+                    del st.session_state.selected_folder
+                    st.rerun()
+            
+            # Horizontal line for visual separation
+            st.markdown("---")
+            
+            # Create tabs for different views of the PDF
+            tabs = st.tabs(["📋 Overview", "📝 Content Preview", "🔍 Details"])
+            
+            # Tab 1: Overview - Quick summary and main actions
+            with tabs[0]:
+                # Two columns - left for info, right for actions
+                col1, col2 = st.columns([3, 2])
+                
+                with col1:
+                    # Clean, card-style info display
+                    st.markdown("""
+                    <style>
+                    .info-card {
+                        background-color: #f8f9fa;
+                        border-radius: 0.5rem;
+                        padding: 1.5rem;
+                        margin-bottom: 1rem;
+                        border-left: 5px solid #4361ee;
+                    }
+                    .info-item {
+                        margin-bottom: 0.8rem;
+                    }
+                    .info-label {
+                        font-weight: 600;
+                        color: #495057;
+                    }
+                    .info-value {
+                        color: #212529;
+                    }
+                    </style>
+                    """, unsafe_allow_html=True)
+                    
+                    st.markdown(f"""
+                    <div class="info-card">
+                        <div class="info-item">
+                            <span class="info-label">File:</span>
+                            <span class="info-value">{selected_pdf}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Collection:</span>
+                            <span class="info-value">{get_collection_name(selected_class, selected_folder)}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Size:</span>
+                            <span class="info-value">{file_info['size']}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Last Modified:</span>
+                            <span class="info-value">{file_info['modified']}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Location:</span>
+                            <span class="info-value">{pdf_folder_path}</span>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with col2:
+                    # Action buttons in a visually appealing card
+                    st.markdown("""
+                    <style>
+                    .action-card {
+                        background-color: #f8f9fa;
+                        border-radius: 0.5rem;
+                        padding: 1.5rem;
+                        margin-bottom: 1rem;
+                        border-left: 5px solid #4cc9f0;
+                    }
+                    </style>
+                    """, unsafe_allow_html=True)
+                    
+                    st.markdown("""
+                    <div class="action-card">
+                        <h4>Available Actions</h4>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Read file for download button
+                    with open(pdf_path, "rb") as file:
+                        pdf_contents = file.read()
+                        st.download_button(
+                            label="📥 Download PDF",
+                            data=pdf_contents,
+                            file_name=selected_pdf,
+                            mime="application/pdf",
+                            use_container_width=True
+                        )
+                    
+                    st.button("🔄 Reprocess PDF", 
+                            use_container_width=True,
+                            on_click=lambda: st.session_state.update({'reprocess_pdf': True}))
+                    
+                    st.button("🗑️ Delete PDF", 
+                            use_container_width=True,
+                            type="secondary",
+                            on_click=lambda: st.session_state.update({
+                                'delete_pdf': selected_pdf,
+                                'delete_folder': selected_folder,
+                                'selected_pdf': None,
+                                'selected_folder': None
+                            }))
+                        
+                    # Handle reprocessing if button was clicked
+                    if hasattr(st.session_state, 'reprocess_pdf') and st.session_state.reprocess_pdf:
+                        with st.spinner(f"Reprocessing {selected_pdf}..."):
+                            role = "teacher" if selected_folder == "Teacher" else "student"
+                            collection_name = get_collection_name(selected_class, role)
+                            # Reprocess just this folder with this single PDF
+                            process_result = process_all_pdfs(pdf_folder_path, collection_name)
+                            
+                            if process_result:
+                                st.success(f"✅ Successfully reprocessed {selected_pdf}")
+                            else:
+                                st.error(f"❌ Failed to reprocess {selected_pdf}")
+                            
+                            # Clear the flag
+                            del st.session_state.reprocess_pdf
+            
+            # Tab 2: Content Preview
+            with tabs[1]:
+                try:
+                    from PyPDF2 import PdfReader
+                    
+                    # Create a reader object
+                    reader = PdfReader(pdf_path)
+                    
+                    # Get the number of pages
+                    num_pages = len(reader.pages)
+                    
+                    if num_pages > 0:
+                        # Let user select which page to view if multiple pages
+                        if num_pages > 1:
+                            page_num = st.select_slider(
+                                "Select page to view:",
+                                options=list(range(1, num_pages + 1)),
+                                value=1
+                            )
+                        else:
+                            page_num = 1
+                        
+                        # Display page info
+                        st.caption(f"Viewing page {page_num} of {num_pages}")
+                        
+                        # Get page content
+                        page = reader.pages[page_num - 1]  # Adjust for 0-based index
+                        page_text = page.extract_text()
+                        
+                        # Create a cleaner text display
+                        st.markdown("""
+                        <style>
+                        .pdf-content {
+                            background-color: white;
+                            border: 1px solid #dee2e6;
+                            border-radius: 0.5rem;
+                            padding: 1.5rem;
+                            font-family: monospace;
+                            white-space: pre-wrap;
+                            overflow-x: auto;
+                            line-height: 1.5;
+                        }
+                        </style>
+                        """, unsafe_allow_html=True)
+                        
+                        # First create the HTML content variable separately
+                        html_content = page_text.replace('\n', '<br>')
+
+                        # Then use it in the f-string
+                        st.markdown(f"""
+                        <div class="pdf-content">
+                        {html_content}
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # Navigation buttons for multi-page PDFs
+                        if num_pages > 1:
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                if page_num > 1:
+                                    if st.button("◀️ Previous Page", use_container_width=True):
+                                        st.session_state.current_page = page_num - 1
+                                        st.rerun()
+                            with col2:
+                                if page_num < num_pages:
+                                    if st.button("Next Page ▶️", use_container_width=True):
+                                        st.session_state.current_page = page_num + 1
+                                        st.rerun()
+                    else:
+                        st.info("This PDF does not contain any pages.")
+                        
+                except Exception as e:
+                    st.warning(f"Unable to preview PDF content.")
+                    st.info("You can download the PDF to view it in your preferred PDF reader.")
+                    st.expander("Technical Error Details").write(str(e))
+            
+            # Tab 3: Details - Technical information about the PDF
+            with tabs[2]:
+                try:
+                    # Display more detailed info about the PDF
+                    import fitz  # PyMuPDF
+                    
+                    st.subheader("PDF Technical Information")
+                    
+                    try:
+                        # Try to open with PyMuPDF for more detailed info
+                        doc = fitz.open(pdf_path)
+                        
+                        # Two columns for metadata
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.markdown("### Document Properties")
+                            properties = {
+                                "Page Count": doc.page_count,
+                                "Form Fields": len(doc.get_form_text_fields()),
+                                "File Size": file_info['size'],
+                                "Format": f"PDF {doc.pdf_version}",
+                                "Has Annotations": "Yes" if doc.has_annots() else "No",
+                            }
+                            
+                            for prop, value in properties.items():
+                                st.markdown(f"**{prop}:** {value}")
+                        
+                        with col2:
+                            st.markdown("### Metadata")
+                            metadata = doc.metadata
+                            if metadata:
+                                for key, value in metadata.items():
+                                    if value and str(value).strip():
+                                        st.markdown(f"**{key}:** {value}")
+                            else:
+                                st.info("No metadata available for this PDF.")
+                        
+                        # Close the document
+                        doc.close()
+                        
+                    except ImportError:
+                        st.info("Install PyMuPDF for more detailed PDF information.")
+                        st.code("pip install pymupdf", language="bash")
+                    except Exception as e:
+                        st.warning("Cannot extract detailed PDF information.")
+                        st.expander("Error details").write(str(e))
+                        
+                except ImportError:
+                    st.info("For detailed PDF analysis, install additional libraries:")
+                    st.code("pip install pymupdf", language="bash")
+            
+            # Stop further rendering of dashboard content
+            st.stop()
+        
+        # Class File Explorer
+        st.subheader(f"📁 {selected_class} File Explorer")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("Teacher Materials")
+            if teacher_pdfs:
+                # Create a visual card for each PDF
+                for pdf in teacher_pdfs:
+                    pdf_path = os.path.join(teacher_folder, pdf)
+                    file_info = get_file_info(pdf_path)
+                    
+                    # Create a card-like container with border
+                    st.markdown(f"""
+                    <div style="border:1px solid #ddd; border-radius:5px; padding:10px; margin-bottom:10px;">
+                        <h4 style="margin-top:0">📘 {pdf}</h4>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    st.write(f"**Size:** {file_info['size']}")
+                    st.write(f"**Last Modified:** {file_info['modified']}")
+                    
+                    button_col1, button_col2 = st.columns([1, 1])
+                    with button_col1:
+                        if st.button(f"View Info", key=f"view_{pdf}_teacher"):
+                            st.session_state.selected_pdf = pdf
+                            st.session_state.selected_folder = "Teacher"
+                            st.rerun()
+                    
+                    with button_col2:
+                        if st.button(f"Delete", key=f"delete_{pdf}_teacher"):
+                            st.session_state.delete_pdf = pdf
+                            st.session_state.delete_folder = "Teacher"
+                            st.rerun()
+                    
+                    # Add a separator between files
+                    st.markdown("---")
             else:
+                st.info("No teacher PDFs uploaded yet.")
+        
+        with col2:
+            st.subheader("Student Materials")
+            if student_pdfs:
+                # Create a visual card for each PDF
+                for pdf in student_pdfs:
+                    pdf_path = os.path.join(student_folder, pdf)
+                    file_info = get_file_info(pdf_path)
+                    
+                    # Create a card-like container with border
+                    st.markdown(f"""
+                    <div style="border:1px solid #ddd; border-radius:5px; padding:10px; margin-bottom:10px;">
+                        <h4 style="margin-top:0">📗 {pdf}</h4>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    st.write(f"**Size:** {file_info['size']}")
+                    st.write(f"**Last Modified:** {file_info['modified']}")
+                    
+                    button_col1, button_col2 = st.columns([1, 1])
+                    with button_col1:
+                        if st.button(f"View Info", key=f"view_{pdf}_student"):
+                            st.session_state.selected_pdf = pdf
+                            st.session_state.selected_folder = "Student"
+                            st.rerun()
+                    
+                    with button_col2:
+                        if st.button(f"Delete", key=f"delete_{pdf}_student"):
+                            st.session_state.delete_pdf = pdf
+                            st.session_state.delete_folder = "Student"
+                            st.rerun()
+                    
+                    # Add a separator between files
+                    st.markdown("---")
+            else:
+                st.info("No student PDFs uploaded yet.")
+        
+        # Handle file deletion from dashboard
+        if hasattr(st.session_state, 'delete_pdf') and hasattr(st.session_state, 'delete_folder'):
+            delete_pdf = st.session_state.delete_pdf
+            delete_folder = st.session_state.delete_folder
+            
+            delete_folder_path = teacher_folder if delete_folder == "Teacher" else student_folder
+            delete_path = os.path.join(delete_folder_path, delete_pdf)
+            
+            st.warning(f"Are you sure you want to delete {delete_pdf} from {delete_folder}?")
+            col1, col2 = st.columns([1, 3])
+            
+            with col1:
+                if st.button("Confirm Delete", type="primary"):
+                    try:
+                        os.remove(delete_path)
+                        st.success(f"Successfully deleted {delete_pdf}")
+                        # Clear the deletion state
+                        del st.session_state.delete_pdf
+                        del st.session_state.delete_folder
+                        time.sleep(1)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error deleting file: {e}")
+            
+            with col2:
+                if st.button("Cancel"):
+                    # Clear the deletion state
+                    del st.session_state.delete_pdf
+                    del st.session_state.delete_folder
+                    st.rerun()
+    
+    # -----------------------------
+    # MANAGE PDFs SECTION
+    # -----------------------------
+    elif admin_action == "Manage PDFs":
+        st.header("📂 Upload PDFs")
+        
+        # Display current content summary
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader(f"📘 Teacher Materials ({len(teacher_pdfs)} files)")
+            if teacher_pdfs:
+                with st.expander("View Teacher PDFs", expanded=True):
+                    for pdf in teacher_pdfs:
+                        pdf_path = os.path.join(teacher_folder, pdf)
+                        file_info = get_file_info(pdf_path)
+                        st.write(f"• **{pdf}** - {file_info['size']} - {file_info['modified']}")
+            else:
+                st.info("No teacher PDFs uploaded for this class.")
+        
+        with col2:
+            st.subheader(f"📗 Student Materials ({len(student_pdfs)} files)")
+            if student_pdfs:
+                with st.expander("View Student PDFs", expanded=True):
+                    for pdf in student_pdfs:
+                        pdf_path = os.path.join(student_folder, pdf)
+                        file_info = get_file_info(pdf_path)
+                        st.write(f"• **{pdf}** - {file_info['size']} - {file_info['modified']}")
+            else:
+                st.info("No student PDFs uploaded for this class.")
+        
+        # Upload Section
+        st.subheader("📤 Upload a New PDF")
+        upload_destination = st.radio("Upload PDF to:", ["Teacher", "Student", "Both"], horizontal=True)
+        
+        # Visual separator
+        st.markdown("---")
+        
+        uploaded_pdf = st.file_uploader("Choose a PDF to Upload", type=["pdf"])
+        upload_status = st.empty()
+        
+        # Prevent infinite rerun by tracking upload state
+        if "upload_complete" not in st.session_state:
+            st.session_state.upload_complete = False
+        
+        # Progress bar placeholder
+        progress_bar = st.empty()
+        
+        if uploaded_pdf is not None and not st.session_state.upload_complete:
+            # Read the file content once
+            pdf_content = uploaded_pdf.read()
+            
+            destination_folders = []
+            if upload_destination in ["Teacher", "Both"]:
+                destination_folders.append(teacher_folder)
+            if upload_destination in ["Student", "Both"]:
+                destination_folders.append(student_folder)
+            
+            # Show a progress bar for the overall process
+            progress_bar.progress(0, text="Starting upload process...")
+            time.sleep(0.5)
+            
+            success_count = 0
+            skip_count = 0
+            
+            for i, folder in enumerate(destination_folders):
+                pdf_path = os.path.join(folder, uploaded_pdf.name)
+                role = "teacher" if folder == teacher_folder else "student"
+                
+                # Update progress to show we're processing this folder
+                progress_percent = (i / len(destination_folders)) * 0.4  # First 40% is for preparation
+                progress_bar.progress(progress_percent, text=f"Preparing to upload to {role} collection...")
+                time.sleep(0.5)
+                
+                # Prevent duplicate uploads
+                if os.path.exists(pdf_path):
+                    upload_status.warning(f"⚠️ The file '{uploaded_pdf.name}' already exists in {role} folder. Skipping upload.")
+                    skip_count += 1
+                    continue
+                
                 # Write the content to the file
                 with open(pdf_path, "wb") as f:
                     f.write(pdf_content)
-
-                st.info(f"⏳ Processing {uploaded_pdf.name}... (This may take a while)")
-
-                # ✅ Process PDFs and store in ChromaDB collections
-                role = "teacher" if folder == teacher_folder else "student"
+                
+                # Show we've written the file
+                progress_percent = 0.4 + (i / len(destination_folders)) * 0.2  # Next 20% for file writing
+                progress_bar.progress(progress_percent, text=f"Uploaded file to {role} folder...")
+                
+                # Processing message
+                upload_status.info(f"⏳ Processing {uploaded_pdf.name} for {role}... (This may take a while)")
+                
+                # Process PDFs and store in ChromaDB collections
                 collection_name = get_collection_name(selected_class, role)
-                process_all_pdfs(folder, collection_name)  # Pass the folder and collection name to process_all_pdfs
-                st.success(f"✅ Uploaded & Processed {uploaded_pdf.name} into {collection_name} collection.")
-
-        # ✅ Set upload complete flag to prevent rerun
-        st.session_state.upload_complete = True
-        st.rerun()
-
-    # Section 2: Delete PDFs
-    st.subheader("❌ Delete PDFs")
-    delete_folder = st.radio("Select Folder:", ["Teacher", "Student"])
-    delete_folder_path = teacher_folder if delete_folder == "Teacher" else student_folder
-
-    pdf_files = [f for f in os.listdir(delete_folder_path) if f.endswith(".pdf")]
-    if pdf_files:
-        selected_pdf = st.selectbox("Select a PDF to Delete", pdf_files)
-        if st.button("Delete Selected PDF"):
-            os.remove(os.path.join(delete_folder_path, selected_pdf))
-            st.success(f"Deleted {selected_pdf}")
-            st.rerun()
-    else:
-        st.write("No PDFs found in selected folder.")
-
-    # Section 3: Update Class Passwords
-    st.subheader("🔑 Manage Class Passwords")
-    with open(PASSWORDS_FILE, "r") as f:
-        passwords = json.load(f)
-
-    new_password = st.text_input(f"Set New Password for {selected_class}_{upload_destination}", type="password")
-    if st.button("Update Password"):
-        passwords[f"{selected_class}_{upload_destination}"] = new_password
-        with open(PASSWORDS_FILE, "w") as f:
-            json.dump(passwords, f, indent=4)
-        st.success(f"✅ Password updated for {selected_class}_{upload_destination}")
-
-    # Section 4: View Access Logs
-    st.subheader("📜 Access Logs")
-    if os.path.exists(LOGS_FILE):
-        try:
-            logs_df = pd.read_csv(LOGS_FILE, on_bad_lines='skip')
-            st.dataframe(logs_df)
-        except pd.errors.ParserError:
-            st.error("⚠️ Error reading access logs. The file may have formatting issues.")
-    else:
-        st.write("No access logs found.")
-
-    # Logout Button
-    if st.button("Logout"):
+                process_result = process_all_pdfs(folder, collection_name)
+                
+                # Show processing completion
+                progress_percent = 0.6 + (i / len(destination_folders)) * 0.4  # Final 40% for processing
+                progress_bar.progress(progress_percent, text=f"Processing {role} collection...")
+                
+                if process_result:
+                    success_count += 1
+            
+            # Complete the progress bar
+            progress_bar.progress(100, text="Upload and processing complete!")
+            
+            # Final status message
+            if success_count > 0:
+                upload_status.success(f"✅ Successfully uploaded and processed {uploaded_pdf.name} for {success_count} collection(s). {skip_count} collection(s) skipped.")
+            else:
+                upload_status.error("❌ No files were uploaded. Please check the error messages above.")
+            
+            # Set upload complete flag to prevent rerun
+            st.session_state.upload_complete = True
+            
+            # Add a button to reset the uploader
+            if st.button("Upload Another PDF"):
+                st.session_state.upload_complete = False
+                st.rerun()
+    
+    # -----------------------------
+    # DELETE PDFs SECTION
+    # -----------------------------
+    elif admin_action == "Delete PDFs":
+        st.header("❌ Delete PDFs")
+        
+        # Create tabs for Teacher and Student materials
+        tab1, tab2 = st.tabs(["Teacher Materials", "Student Materials"])
+        
+        with tab1:
+            st.subheader(f"📘 {selected_class} - Teacher PDFs")
+            delete_folder_path = teacher_folder
+            pdf_files = get_pdfs_in_folder(delete_folder_path)
+            
+            if pdf_files:
+                # Create a visual grid of files
+                cols = st.columns(3)
+                for i, pdf in enumerate(pdf_files):
+                    pdf_path = os.path.join(delete_folder_path, pdf)
+                    file_info = get_file_info(pdf_path)
+                    
+                    with cols[i % 3]:
+                        st.markdown(f"""
+                        <div style="border:1px solid #cccccc; padding:10px; border-radius:5px; margin-bottom:10px">
+                            <h4>📘 {pdf}</h4>
+                            <p><b>Size:</b> {file_info['size']}</p>
+                            <p><b>Modified:</b> {file_info['modified']}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        if st.button(f"Delete {pdf}", key=f"del_teacher_{pdf}"):
+                            st.session_state.confirm_delete = True
+                            st.session_state.delete_file = pdf
+                            st.session_state.delete_role = "Teacher"
+                            st.rerun()
+            else:
+                st.info("No Teacher PDFs found for this class.")
+        
+        with tab2:
+            st.subheader(f"📗 {selected_class} - Student PDFs")
+            delete_folder_path = student_folder
+            pdf_files = get_pdfs_in_folder(delete_folder_path)
+            
+            if pdf_files:
+                # Create a visual grid of files
+                cols = st.columns(3)
+                for i, pdf in enumerate(pdf_files):
+                    pdf_path = os.path.join(delete_folder_path, pdf)
+                    file_info = get_file_info(pdf_path)
+                    
+                    with cols[i % 3]:
+                        st.markdown(f"""
+                        <div style="border:1px solid #cccccc; padding:10px; border-radius:5px; margin-bottom:10px">
+                            <h4>📗 {pdf}</h4>
+                            <p><b>Size:</b> {file_info['size']}</p>
+                            <p><b>Modified:</b> {file_info['modified']}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        if st.button(f"Delete {pdf}", key=f"del_student_{pdf}"):
+                            st.session_state.confirm_delete = True
+                            st.session_state.delete_file = pdf
+                            st.session_state.delete_role = "Student"
+                            st.rerun()
+            else:
+                st.info("No Student PDFs found for this class.")
+        
+        # Handle confirmation dialog
+        if hasattr(st.session_state, 'confirm_delete') and st.session_state.confirm_delete:
+            delete_file = st.session_state.delete_file
+            delete_role = st.session_state.delete_role
+            
+            delete_path = os.path.join(teacher_folder if delete_role == "Teacher" else student_folder, delete_file)
+            
+            st.warning(f"⚠️ Are you sure you want to delete **{delete_file}** from the **{delete_role}** collection?")
+            st.markdown("This action cannot be undone.")
+            
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                if st.button("✅ Yes, Delete", type="primary"):
+                    try:
+                        os.remove(delete_path)
+                        st.success(f"Successfully deleted {delete_file}")
+                        
+                        # Clear the confirmation state
+                        del st.session_state.confirm_delete
+                        del st.session_state.delete_file
+                        del st.session_state.delete_role
+                        
+                        # Small delay to show the success message
+                        time.sleep(1)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error deleting file: {e}")
+            
+            with col2:
+                if st.button("❌ Cancel"):
+                    # Clear the confirmation state
+                    del st.session_state.confirm_delete
+                    del st.session_state.delete_file
+                    del st.session_state.delete_role
+                    st.rerun()
+    
+    # -----------------------------
+    # MANAGE PASSWORDS SECTION
+    # -----------------------------
+    elif admin_action == "Manage Passwords":
+        st.header("🔑 Manage Passwords")
+        
+        # Load current passwords
+        if os.path.exists(PASSWORDS_FILE):
+            with open(PASSWORDS_FILE, "r") as f:
+                passwords = json.load(f)
+        else:
+            # Initialize empty passwords
+            passwords = {}
+            for class_name in ["General"] + [f"Class {i}" for i in range(1, 11)]:
+                key = f"class_{class_name.split()[1]}" if "Class" in class_name else "general"
+                passwords[key] = {
+                    "Teacher": "",
+                    "Student": ""
+                }
+            # Add principal password
+            passwords["Principal"] = ""
+        
+        # Display current passwords in a table
+        st.subheader("Current Passwords")
+        
+        # Principal password section
+        st.subheader("Principal Access")
+        principal_pass = passwords.get("Principal", "")
+        new_principal_pass = st.text_input("Set Principal Password", value=principal_pass, type="password")
+        
+        if st.button("Update Principal Password"):
+            passwords["Principal"] = new_principal_pass
+            with open(PASSWORDS_FILE, "w") as f:
+                json.dump(passwords, f, indent=4)
+            st.success("✅ Principal password updated!")
+        
+        # Class-specific passwords
+        st.subheader(f"{selected_class} Access")
+        
+        col1, col2 = st.columns(2)
+        
+        # Determine the key for the current class
+        class_key = f"class_{selected_class.split()[1]}" if "Class" in selected_class else "general"
+        
+        # Check if this class exists in the passwords dict
+        if class_key not in passwords:
+            passwords[class_key] = {"Teacher": "", "Student": ""}
+        
+        with col1:
+            st.markdown("### Teacher Access")
+            current_teacher_pass = passwords[class_key].get("Teacher", "")
+            new_teacher_pass = st.text_input(
+                f"Set Teacher Password for {selected_class}", 
+                value=current_teacher_pass, 
+                type="password",
+                key=f"teacher_pass_{selected_class}"
+            )
+            
+            if st.button(f"Update {selected_class} Teacher Password"):
+                if class_key not in passwords:
+                    passwords[class_key] = {}
+                passwords[class_key]["Teacher"] = new_teacher_pass
+                with open(PASSWORDS_FILE, "w") as f:
+                    json.dump(passwords, f, indent=4)
+                st.success(f"✅ {selected_class} Teacher password updated!")
+        
+        with col2:
+            st.markdown("### Student Access")
+            current_student_pass = passwords[class_key].get("Student", "")
+            new_student_pass = st.text_input(
+                f"Set Student Password for {selected_class}", 
+                value=current_student_pass, 
+                type="password",
+                key=f"student_pass_{selected_class}"
+            )
+            
+            if st.button(f"Update {selected_class} Student Password"):
+                if class_key not in passwords:
+                    passwords[class_key] = {}
+                passwords[class_key]["Student"] = new_student_pass
+                with open(PASSWORDS_FILE, "w") as f:
+                    json.dump(passwords, f, indent=4)
+                st.success(f"✅ {selected_class} Student password updated!")
+        
+        # Add option to export password document
+        st.subheader("Export Password Document")
+        if st.button("Generate Password Document for Sharing"):
+            st.markdown("### School PDF Q&A System - Access Credentials")
+            
+            # Create the document in plain text for easy copying
+            doc = "# School PDF Q&A System - Access Credentials\n\n"
+            doc += "## Principal Access\n"
+            doc += f"Principal: {passwords.get('Principal', '')}\n\n"
+            
+            doc += "## Teacher Access\n"
+            for class_name in ["General"] + [f"Class {i}" for i in range(1, 11)]:
+                key = f"class_{class_name.split()[1]}" if "Class" in class_name else "general"
+                if key in passwords and "Teacher" in passwords[key]:
+                    doc += f"{class_name} Teacher: {passwords[key]['Teacher']}\n"
+            
+            doc += "\n## Student Access\n"
+            for class_name in ["General"] + [f"Class {i}" for i in range(1, 11)]:
+                key = f"class_{class_name.split()[1]}" if "Class" in class_name else "general"
+                if key in passwords and "Student" in passwords[key]:
+                    doc += f"{class_name} Student: {passwords[key]['Student']}\n"
+            
+            st.download_button(
+                label="Download Password Document",
+                data=doc,
+                file_name="school_access_credentials.txt",
+                mime="text/plain"
+            )
+    
+    # -----------------------------
+    # ACCESS LOGS SECTION
+    # -----------------------------
+    elif admin_action == "Access Logs":
+        st.header("📜 Access Logs")
+        
+        if os.path.exists(LOGS_FILE):
+            try:
+                logs_df = pd.read_csv(LOGS_FILE, on_bad_lines='skip')
+                
+                # Add filtering options
+                st.subheader("Filter Logs")
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    if 'role' in logs_df.columns:
+                        roles = ['All'] + list(logs_df['role'].unique())
+                        selected_role = st.selectbox('Filter by Role:', roles)
+                
+                with col2:
+                    if 'class' in logs_df.columns:
+                        classes = ['All'] + list(logs_df['class'].unique())
+                        selected_class_filter = st.selectbox('Filter by Class:', classes)
+                
+                # Apply filters
+                filtered_df = logs_df.copy()
+                if selected_role != 'All' and 'role' in logs_df.columns:
+                    filtered_df = filtered_df[filtered_df['role'] == selected_role]
+                
+                if selected_class_filter != 'All' and 'class' in logs_df.columns:
+                    filtered_df = filtered_df[filtered_df['class'] == selected_class_filter]
+                
+                # Display filtered data
+                st.dataframe(filtered_df, use_container_width=True)
+                
+                # Add export options
+                if st.button("Export Filtered Logs"):
+                    csv = filtered_df.to_csv(index=False)
+                    st.download_button(
+                        label="Download CSV",
+                        data=csv,
+                        file_name=f"access_logs_{datetime.now().strftime('%Y%m%d')}.csv",
+                        mime="text/csv"
+                    )
+                
+            except pd.errors.ParserError:
+                st.error("⚠️ Error reading access logs. The file may have formatting issues.")
+            except pd.errors.EmptyDataError:
+                st.info("No access logs found. The log file will be created when users access the system.")
+        else:
+            st.info("No access logs found. The log file will be created when users access the system.")
+    
+    # Logout Button in sidebar
+    if st.sidebar.button("Logout", type="primary"):
         st.session_state.admin_authenticated = False
-        st.session_state.upload_complete = False  # Reset upload state
+        if 'upload_complete' in st.session_state:
+            del st.session_state.upload_complete
         st.rerun()
 
-# ----------------------------------------
-# User Page
-# ----------------------------------------
+# User Page content would continue here...
 elif page == "User":
     st.title("School PDF Q&A System")
 
