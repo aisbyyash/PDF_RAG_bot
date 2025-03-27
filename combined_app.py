@@ -1,6 +1,6 @@
-# __import__('pysqlite3')
-# import sys
-# sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+__import__('pysqlite3')
+import sys
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 import streamlit as st
 import os
 import json
@@ -345,6 +345,7 @@ if page == "Admin":
                         </style>
                         """, unsafe_allow_html=True)
                         
+                        # Fix for the problematic line with backslash in f-string
                         # First create the HTML content variable separately
                         html_content = page_text.replace('\n', '<br>')
 
