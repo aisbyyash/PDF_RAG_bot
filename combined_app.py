@@ -61,39 +61,17 @@ page = st.sidebar.radio("Go to", ["Admin", "User"])
 # Admin Page
 # ----------------------------------------
 if page == "Admin":
-    # Define admin credentials
-    ADMIN_USERNAME = "admin"
-    ADMIN_PASSWORD = "admin123"
-
     st.title("📊 Admin Dashboard - School PDF Q&A System")
 
     # Admin Login System
     if "admin_authenticated" not in st.session_state:
-        st.session_state.admin_authenticated = False
-
-    if not st.session_state.admin_authenticated:
-        st.subheader("🔑 Admin Login")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            username = st.text_input("Username:", placeholder="Enter admin username")
-        with col2:
-            password = st.text_input("Password:", type="password", placeholder="Enter admin password")
-
-        if st.button("Login", type="primary"):
-            if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
-                st.session_state.admin_authenticated = True
-                st.success("✅ Login successful! Redirecting...")
-                st.rerun()
-            else:
-                st.error("❌ Invalid credentials. Please try again.")
-        st.stop()
+        st.session_state.admin_authenticated = True
 
     # ✅ Admin Successfully Logged In - Show Dashboard Features
     st.sidebar.header("Admin Actions")
     admin_action = st.sidebar.selectbox(
         "Select Action",
-        ["Dashboard Overview", "Manage PDFs", "Delete PDFs", "Manage Passwords", "Access Logs"]
+        ["Dashboard Overview", "Manage PDFs", "Delete PDFs", "Access Logs"]
     )
     
     # Initialize class selection in session state if not present
@@ -763,119 +741,6 @@ if page == "Admin":
                     st.rerun()
     
     # -----------------------------
-    # MANAGE PASSWORDS SECTION
-    # -----------------------------
-    elif admin_action == "Manage Passwords":
-        st.header("🔑 Manage Passwords")
-        
-        # Load current passwords
-        if os.path.exists(PASSWORDS_FILE):
-            with open(PASSWORDS_FILE, "r") as f:
-                passwords = json.load(f)
-        else:
-            # Initialize empty passwords
-            passwords = {}
-            for class_name in ["General"] + [f"Class {i}" for i in range(1, 11)]:
-                key = f"class_{class_name.split()[1]}" if "Class" in class_name else "general"
-                passwords[key] = {
-                    "Teacher": "",
-                    "Student": ""
-                }
-            # Add principal password
-            passwords["Principal"] = ""
-        
-        # Display current passwords in a table
-        st.subheader("Current Passwords")
-        
-        # Principal password section
-        st.subheader("Principal Access")
-        principal_pass = passwords.get("Principal", "")
-        new_principal_pass = st.text_input("Set Principal Password", value=principal_pass, type="password")
-        
-        if st.button("Update Principal Password"):
-            passwords["Principal"] = new_principal_pass
-            with open(PASSWORDS_FILE, "w") as f:
-                json.dump(passwords, f, indent=4)
-            st.success("✅ Principal password updated!")
-        
-        # Class-specific passwords
-        st.subheader(f"{selected_class} Access")
-        
-        col1, col2 = st.columns(2)
-        
-        # Determine the key for the current class
-        class_key = f"class_{selected_class.split()[1]}" if "Class" in selected_class else "general"
-        
-        # Check if this class exists in the passwords dict
-        if class_key not in passwords:
-            passwords[class_key] = {"Teacher": "", "Student": ""}
-        
-        with col1:
-            st.markdown("### Teacher Access")
-            current_teacher_pass = passwords[class_key].get("Teacher", "")
-            new_teacher_pass = st.text_input(
-                f"Set Teacher Password for {selected_class}", 
-                value=current_teacher_pass, 
-                type="password",
-                key=f"teacher_pass_{selected_class}"
-            )
-            
-            if st.button(f"Update {selected_class} Teacher Password"):
-                if class_key not in passwords:
-                    passwords[class_key] = {}
-                passwords[class_key]["Teacher"] = new_teacher_pass
-                with open(PASSWORDS_FILE, "w") as f:
-                    json.dump(passwords, f, indent=4)
-                st.success(f"✅ {selected_class} Teacher password updated!")
-        
-        with col2:
-            st.markdown("### Student Access")
-            current_student_pass = passwords[class_key].get("Student", "")
-            new_student_pass = st.text_input(
-                f"Set Student Password for {selected_class}", 
-                value=current_student_pass, 
-                type="password",
-                key=f"student_pass_{selected_class}"
-            )
-            
-            if st.button(f"Update {selected_class} Student Password"):
-                if class_key not in passwords:
-                    passwords[class_key] = {}
-                passwords[class_key]["Student"] = new_student_pass
-                with open(PASSWORDS_FILE, "w") as f:
-                    json.dump(passwords, f, indent=4)
-                st.success(f"✅ {selected_class} Student password updated!")
-        
-        # Add option to export password document
-        st.subheader("Export Password Document")
-        if st.button("Generate Password Document for Sharing"):
-            st.markdown("### School PDF Q&A System - Access Credentials")
-            
-            # Create the document in plain text for easy copying
-            doc = "# School PDF Q&A System - Access Credentials\n\n"
-            doc += "## Principal Access\n"
-            doc += f"Principal: {passwords.get('Principal', '')}\n\n"
-            
-            doc += "## Teacher Access\n"
-            for class_name in ["General"] + [f"Class {i}" for i in range(1, 11)]:
-                key = f"class_{class_name.split()[1]}" if "Class" in class_name else "general"
-                if key in passwords and "Teacher" in passwords[key]:
-                    doc += f"{class_name} Teacher: {passwords[key]['Teacher']}\n"
-            
-            doc += "\n## Student Access\n"
-            for class_name in ["General"] + [f"Class {i}" for i in range(1, 11)]:
-                key = f"class_{class_name.split()[1]}" if "Class" in class_name else "general"
-                if key in passwords and "Student" in passwords[key]:
-                    doc += f"{class_name} Student: {passwords[key]['Student']}\n"
-            
-            st.download_button(
-                label="Download Password Document",
-                data=doc,
-                file_name="school_access_credentials.txt",
-                mime="text/plain"
-            )
-    
-    # -----------------------------
     # ACCESS LOGS SECTION
     # -----------------------------
     elif admin_action == "Access Logs":
@@ -926,15 +791,7 @@ if page == "Admin":
                 st.info("No access logs found. The log file will be created when users access the system.")
         else:
             st.info("No access logs found. The log file will be created when users access the system.")
-    
-    # Logout Button in sidebar
-    if st.sidebar.button("Logout", type="primary"):
-        st.session_state.admin_authenticated = False
-        if 'upload_complete' in st.session_state:
-            del st.session_state.upload_complete
-        st.rerun()
 
-# User Page content would continue here...
 elif page == "User":
     # Apply better styling for the user interface
     st.markdown("""
@@ -992,31 +849,19 @@ elif page == "User":
     # Page title with better styling
     st.markdown('<h1 class="main-header">School PDF Q&A System</h1>', unsafe_allow_html=True)
 
-    # Load passwords from JSON file
-    if os.path.exists(PASSWORDS_FILE):
-        with open(PASSWORDS_FILE, "r") as f:
-            CLASS_PASSWORDS = json.load(f)
-    else:
-        st.error("⚠️ Password file not found! Please create 'passwords.json' inside the 'data' folder.")
-        st.stop()
-
-    # Check if user is already authenticated
+    # User is automatically authenticated - no password check needed
     if "authenticated" not in st.session_state:
-        st.session_state.authenticated = False
-
-    # Authentication Flow
-    if not st.session_state.authenticated:
-        # Create a card-like container for login
-        st.markdown('<div class="login-container">', unsafe_allow_html=True)
-        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.session_state.authenticated = True
         
-        st.markdown('<h2 class="section-header">Login to Access Materials</h2>', unsafe_allow_html=True)
+    # Let user select their role and class without authentication
+    if "current_role" not in st.session_state or "current_class" not in st.session_state:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown('<h2 class="section-header">Select Access Level</h2>', unsafe_allow_html=True)
         
         # Use columns for a better layout
         col1, col2 = st.columns(2)
         
         with col1:
-            # Step 1: Select User Role with a nicer label
             st.markdown('<p style="font-weight: 500;">Select Your Role:</p>', unsafe_allow_html=True)
             role = st.selectbox(
                 "Choose your role in the school system",
@@ -1025,7 +870,6 @@ elif page == "User":
             )
         
         with col2:
-            # Step 2: Select Class with a nicer label
             st.markdown('<p style="font-weight: 500;">Select Your Class:</p>', unsafe_allow_html=True)
             class_options = [f"Class {i}" for i in range(1, 11)] + ["General"]
             selected_class = st.selectbox(
@@ -1034,68 +878,26 @@ elif page == "User":
                 label_visibility="collapsed"
             )
         
-        # Generate collection name using the helper function
-        collection_name = get_collection_name(selected_class, role)
-        
-        # Step 3: Password Authentication with a form for better UX
-        st.markdown('<p style="font-weight: 500;">Enter Password:</p>', unsafe_allow_html=True)
-        
-        with st.form("login_form"):
-            password_input = st.text_input(
-                "Password", 
-                type="password", 
-                placeholder="Enter your access password",
-                label_visibility="collapsed"
-            )
+        # Store user selections in session state
+        if st.button("Continue", use_container_width=True, type="primary"):
+            st.session_state.current_role = role
+            st.session_state.current_class = selected_class
+            st.rerun()
             
-            submit_button = st.form_submit_button(
-                "Login", 
-                use_container_width=True,
-                type="primary"
-            )
-            
-            if submit_button:
-                # Determine the correct password based on role and class
-                if role == "Principal":
-                    correct_password = CLASS_PASSWORDS.get("Principal", "")
-                elif selected_class == "General":
-                    correct_password = CLASS_PASSWORDS.get("general", {}).get(role, "")
-                else:
-                    class_key = f"class_{selected_class.split(' ')[1]}"
-                    correct_password = CLASS_PASSWORDS.get(class_key, {}).get(role, "")
-                
-                # Verify password
-                if password_input == correct_password:
-                    st.session_state.authenticated = True
-                    st.session_state.current_role = role
-                    st.session_state.current_class = selected_class
-                    st.success("✅ Login successful! You now have access to the materials.")
-                    # Small delay to show the success message
-                    time.sleep(1)
-                    st.rerun()
-                else:
-                    st.error("❌ Incorrect password. Please try again.")
-        
-        # Close card container
         st.markdown('</div>', unsafe_allow_html=True)
         
-        # Add some helpful information below the login card
-        st.info("If you don't have access credentials, please contact your administrator.")
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        # Stop execution if not authenticated
+        # Skip the rest of the code if role and class are not set yet
         st.stop()
     
-    # User is authenticated - Show chat interface
-    # Display user info and logout option
+    # Display user info with option to change selections
     st.markdown('<div class="user-info">', unsafe_allow_html=True)
     col1, col2 = st.columns([3, 1])
     with col1:
-        st.markdown(f"**Logged in as:** {st.session_state.current_role} | **Class:** {st.session_state.current_class}")
+        st.markdown(f"**Using system as:** {st.session_state.current_role} | **Class:** {st.session_state.current_class}")
     with col2:
-        if st.button("Logout", type="primary"):
-            # Clear session state for logout
-            for key in ['authenticated', 'current_role', 'current_class', 'qa_agent', 'chat_history']:
+        if st.button("Change Selection", type="primary"):
+            # Clear role and class selections to allow reselection
+            for key in ['current_role', 'current_class', 'qa_agent', 'chat_history']:
                 if key in st.session_state:
                     del st.session_state[key]
             st.rerun()
