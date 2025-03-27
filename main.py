@@ -943,7 +943,7 @@ def _load_multiple_collections(collection_names: List[str], chroma_client, embed
         weights = []
         for retriever in valid_retrievers:
             try:
-                sample = retriever.get_relevant_documents("sample query")
+                sample = retriever.invoke(input="sample query")
                 weights.append(0.5 + (len(sample) / 10))  # Base weight plus bonus for available content
             except Exception:
                 weights.append(0.5)  # Default weight in case of error

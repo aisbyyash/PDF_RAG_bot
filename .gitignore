@@ -51,5 +51,3 @@ htmlcov/
 
 # Streamlit cache
 .streamlit/
-
-classes/

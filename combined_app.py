@@ -1,6 +1,6 @@
-__import__('pysqlite3')
-import sys
-sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+# __import__('pysqlite3')
+# import sys
+# sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 import streamlit as st
 import os
 import json
@@ -936,7 +936,61 @@ if page == "Admin":
 
 # User Page content would continue here...
 elif page == "User":
-    st.title("School PDF Q&A System")
+    # Apply better styling for the user interface
+    st.markdown("""
+    <style>
+    .main-header {
+        font-size: 2.5rem;
+        font-weight: 700;
+        margin-bottom: 1.5rem;
+        color: #1E3A8A;
+        text-align: center;
+    }
+    .section-header {
+        font-size: 1.5rem;
+        font-weight: 600;
+        margin-top: 1rem;
+        margin-bottom: 0.5rem;
+        color: #1E3A8A;
+    }
+    .card {
+        background-color: white;
+        border-radius: 10px;
+        padding: 20px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        margin-bottom: 20px;
+    }
+    .login-container {
+        max-width: 800px;
+        margin: 0 auto;
+    }
+    .login-button {
+        background-color: #4CAF50;
+        border: none;
+        color: white;
+        padding: 10px 24px;
+        text-align: center;
+        text-decoration: none;
+        display: inline-block;
+        font-size: 16px;
+        margin: 4px 2px;
+        cursor: pointer;
+        border-radius: 4px;
+    }
+    .user-info {
+        background-color: #F1F1F1;
+        padding: 10px 15px;
+        border-radius: 8px;
+        margin-bottom: 15px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # Page title with better styling
+    st.markdown('<h1 class="main-header">School PDF Q&A System</h1>', unsafe_allow_html=True)
 
     # Load passwords from JSON file
     if os.path.exists(PASSWORDS_FILE):
@@ -946,53 +1000,117 @@ elif page == "User":
         st.error("⚠️ Password file not found! Please create 'passwords.json' inside the 'data' folder.")
         st.stop()
 
-    # Step 1: Select User Role
-    st.subheader("Select Your Role:")
-    role = st.selectbox("Are you a Principal, Teacher, or Student?", ["Principal", "Teacher", "Student"])
-
-    # Step 2: Select Class (or General for shared PDFs)
-    st.subheader("Select Your Class:")
-    class_options = [f"Class {i}" for i in range(1, 11)] + ["General"]
-    selected_class = st.selectbox("Choose a class or general access:", class_options)
-
-    # Generate collection name using the helper function
-    collection_name = get_collection_name(selected_class, role)
-
-    # Step 3: Password Authentication
-    st.subheader("Enter Password to Proceed:")
+    # Check if user is already authenticated
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
 
-    password_input = st.text_input("Enter Password:", type="password", key="password_input")
-
-    if st.button("Submit Password"):
-        if role == "Principal":
-            correct_password = CLASS_PASSWORDS.get("Principal", "")
-        elif selected_class == "General":
-            correct_password = CLASS_PASSWORDS.get("general", {}).get(role, "")
-        else:
-            correct_password = CLASS_PASSWORDS.get(f"class_{selected_class.split(' ')[1]}", {}).get(role, "")
-
-        if password_input == correct_password:
-            st.session_state.authenticated = True
-            st.success("✅ Access granted!")
-        else:
-            st.error("❌ Incorrect password. Please try again.")
-            st.stop()
-
+    # Authentication Flow
     if not st.session_state.authenticated:
+        # Create a card-like container for login
+        st.markdown('<div class="login-container">', unsafe_allow_html=True)
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        
+        st.markdown('<h2 class="section-header">Login to Access Materials</h2>', unsafe_allow_html=True)
+        
+        # Use columns for a better layout
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Step 1: Select User Role with a nicer label
+            st.markdown('<p style="font-weight: 500;">Select Your Role:</p>', unsafe_allow_html=True)
+            role = st.selectbox(
+                "Choose your role in the school system",
+                ["Principal", "Teacher", "Student"],
+                label_visibility="collapsed"
+            )
+        
+        with col2:
+            # Step 2: Select Class with a nicer label
+            st.markdown('<p style="font-weight: 500;">Select Your Class:</p>', unsafe_allow_html=True)
+            class_options = [f"Class {i}" for i in range(1, 11)] + ["General"]
+            selected_class = st.selectbox(
+                "Choose a class or general access",
+                class_options,
+                label_visibility="collapsed"
+            )
+        
+        # Generate collection name using the helper function
+        collection_name = get_collection_name(selected_class, role)
+        
+        # Step 3: Password Authentication with a form for better UX
+        st.markdown('<p style="font-weight: 500;">Enter Password:</p>', unsafe_allow_html=True)
+        
+        with st.form("login_form"):
+            password_input = st.text_input(
+                "Password", 
+                type="password", 
+                placeholder="Enter your access password",
+                label_visibility="collapsed"
+            )
+            
+            submit_button = st.form_submit_button(
+                "Login", 
+                use_container_width=True,
+                type="primary"
+            )
+            
+            if submit_button:
+                # Determine the correct password based on role and class
+                if role == "Principal":
+                    correct_password = CLASS_PASSWORDS.get("Principal", "")
+                elif selected_class == "General":
+                    correct_password = CLASS_PASSWORDS.get("general", {}).get(role, "")
+                else:
+                    class_key = f"class_{selected_class.split(' ')[1]}"
+                    correct_password = CLASS_PASSWORDS.get(class_key, {}).get(role, "")
+                
+                # Verify password
+                if password_input == correct_password:
+                    st.session_state.authenticated = True
+                    st.session_state.current_role = role
+                    st.session_state.current_class = selected_class
+                    st.success("✅ Login successful! You now have access to the materials.")
+                    # Small delay to show the success message
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.error("❌ Incorrect password. Please try again.")
+        
+        # Close card container
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Add some helpful information below the login card
+        st.info("If you don't have access credentials, please contact your administrator.")
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Stop execution if not authenticated
         st.stop()
-
+    
+    # User is authenticated - Show chat interface
+    # Display user info and logout option
+    st.markdown('<div class="user-info">', unsafe_allow_html=True)
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.markdown(f"**Logged in as:** {st.session_state.current_role} | **Class:** {st.session_state.current_class}")
+    with col2:
+        if st.button("Logout", type="primary"):
+            # Clear session state for logout
+            for key in ['authenticated', 'current_role', 'current_class', 'qa_agent', 'chat_history']:
+                if key in st.session_state:
+                    del st.session_state[key]
+            st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
+    
     # Step 4: Start Chat Interface
-    st.subheader("Chat with Your PDFs")
+    st.markdown('<h2 class="section-header">Chat with Your PDFs</h2>', unsafe_allow_html=True)
     
     # Reset QA agent if role or class changes
-    if "current_role" not in st.session_state or st.session_state.current_role != role or \
-       "current_class" not in st.session_state or st.session_state.current_class != selected_class:
+    if "current_role" not in st.session_state or st.session_state.current_role != st.session_state.get('current_role') or \
+       "current_class" not in st.session_state or st.session_state.current_class != st.session_state.get('current_class'):
         if "qa_agent" in st.session_state:
             del st.session_state.qa_agent
-        st.session_state.current_role = role
-        st.session_state.current_class = selected_class
+        st.session_state.current_role = st.session_state.get('current_role')
+        st.session_state.current_class = st.session_state.get('current_class')
     
     if "qa_agent" not in st.session_state:
         try:
@@ -1000,51 +1118,51 @@ elif page == "User":
             collections_to_search = []
             
             # Principal-specific access setup
-            if role == "Principal":
-                st.markdown("### 🔑 Principal Access Options")
-                st.write("As a Principal, you have access to all school materials.")
-                
-                # UI for Principal to configure which collections to search
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    # Class-specific options
-                    st.subheader("Class Materials Access")
-                    search_selected_teacher = st.checkbox("Access Teacher materials for selected class", value=True)
-                    search_selected_student = st.checkbox("Access Student materials for selected class", value=True)
-                
-                with col2:
-                    # General options
-                    st.subheader("General Materials Access")
-                    search_general_teacher = st.checkbox("Access General Teacher materials", value=True)
-                    search_general_student = st.checkbox("Access General Student materials", value=True)
-                
-                # Option to include all classes
-                st.subheader("All School Materials")
-                include_all_classes = st.checkbox("Include materials from ALL classes", value=False)
-                
-                if include_all_classes:
-                    with st.expander("Select specific class materials to include"):
-                        # Allow selecting specific classes and roles to include
-                        for class_num in range(1, 11):
-                            class_name = f"Class {class_num}"
-                            if class_name != selected_class:  # Skip already selected class
-                                col1, col2 = st.columns(2)
-                                with col1:
-                                    include_teacher = st.checkbox(f"{class_name} Teacher materials", value=True)
-                                    if include_teacher:
-                                        collections_to_search.append(get_collection_name(class_name, "Teacher"))
-                                with col2:
-                                    include_student = st.checkbox(f"{class_name} Student materials", value=True)
-                                    if include_student:
-                                        collections_to_search.append(get_collection_name(class_name, "Student"))
+            if st.session_state.current_role == "Principal":
+                with st.expander("🔑 Principal Access Options", expanded=False):
+                    st.write("As a Principal, you have access to all school materials.")
+                    
+                    # UI for Principal to configure which collections to search
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        # Class-specific options
+                        st.subheader("Class Materials Access")
+                        search_selected_teacher = st.checkbox("Access Teacher materials for selected class", value=True)
+                        search_selected_student = st.checkbox("Access Student materials for selected class", value=True)
+                    
+                    with col2:
+                        # General options
+                        st.subheader("General Materials Access")
+                        search_general_teacher = st.checkbox("Access General Teacher materials", value=True)
+                        search_general_student = st.checkbox("Access General Student materials", value=True)
+                    
+                    # Option to include all classes
+                    st.subheader("All School Materials")
+                    include_all_classes = st.checkbox("Include materials from ALL classes", value=False)
+                    
+                    if include_all_classes:
+                        with st.expander("Select specific class materials to include"):
+                            # Allow selecting specific classes and roles to include
+                            for class_num in range(1, 11):
+                                class_name = f"Class {class_num}"
+                                if class_name != st.session_state.current_class:  # Skip already selected class
+                                    col1, col2 = st.columns(2)
+                                    with col1:
+                                        include_teacher = st.checkbox(f"{class_name} Teacher materials", value=True)
+                                        if include_teacher:
+                                            collections_to_search.append(get_collection_name(class_name, "Teacher"))
+                                    with col2:
+                                        include_student = st.checkbox(f"{class_name} Student materials", value=True)
+                                        if include_student:
+                                            collections_to_search.append(get_collection_name(class_name, "Student"))
                 
                 # Add selected class collections based on checkboxes
-                if selected_class != "General":
+                if st.session_state.current_class != "General":
                     if search_selected_teacher:
-                        collections_to_search.append(get_collection_name(selected_class, "Teacher"))
+                        collections_to_search.append(get_collection_name(st.session_state.current_class, "Teacher"))
                     if search_selected_student:
-                        collections_to_search.append(get_collection_name(selected_class, "Student"))
+                        collections_to_search.append(get_collection_name(st.session_state.current_class, "Student"))
                 
                 # Add general collections based on checkboxes
                 if search_general_teacher:
@@ -1052,29 +1170,32 @@ elif page == "User":
                 if search_general_student:
                     collections_to_search.append(get_collection_name("General", "Student"))
                 
-                # Display selected collections
-                st.write(f"Searching across {len(collections_to_search)} collections:")
-                st.text(", ".join(collections_to_search))
+                # Display selected collections in a cleaner way
+                if collections_to_search:
+                    st.success(f"Searching across {len(collections_to_search)} collections")
+                    with st.expander("View collection details"):
+                        st.code(", ".join(collections_to_search))
                 
             else:
                 # Regular user (Teacher or Student)
-                collections_to_search.append(collection_name)
+                collections_to_search.append(get_collection_name(st.session_state.current_class, st.session_state.current_role))
                 
                 # Option to also search general collection
-                if selected_class != "General":
+                if st.session_state.current_class != "General":
                     search_general = st.checkbox("Also search General collection", value=True)
                     if search_general:
-                        general_collection_name = get_collection_name("General", role)
+                        general_collection_name = get_collection_name("General", st.session_state.current_role)
                         collections_to_search.append(general_collection_name)
-                        st.info(f"Searching in both {selected_class} and General collections")
+                        st.info(f"Searching in both {st.session_state.current_class} and General collections")
             
             # Initialize the QA agent with selected collections
             if collections_to_search:
-                st.session_state.qa_agent = get_answer_from_pdfs(collections_to_search)
-                
-                if st.session_state.qa_agent is None:
-                    st.error("Error: No valid data found in the selected collections.")
-                    st.stop()
+                with st.spinner("Loading materials. This may take a moment..."):
+                    st.session_state.qa_agent = get_answer_from_pdfs(collections_to_search)
+                    
+                    if st.session_state.qa_agent is None:
+                        st.error("Error: No valid data found in the selected collections.")
+                        st.stop()
             else:
                 st.error("No collections selected for search. Please select at least one option.")
                 st.stop()
@@ -1083,18 +1204,99 @@ elif page == "User":
             st.error(f"An error occurred while initializing the QA agent: {e}")
             st.stop()
 
-    # WhatsApp-like chat container
+    # WhatsApp-like chat container with improved CSS
+    # Add this CSS before the chat container
+    st.markdown("""
+    <style>
+    .chat-container {
+        background-color: #E5DDD5;
+        border-radius: 10px;
+        padding: 15px;
+        margin-bottom: 15px;
+        max-height: 60vh;
+        overflow-y: auto;
+    }
+    .message-container {
+        display: flex;
+        margin-bottom: 10px;
+        width: 100%;
+    }
+    .message-container.user {
+        justify-content: flex-end;
+    }
+    .message-container.bot {
+        justify-content: flex-start;
+    }
+    .message-bubble {
+        padding: 10px 15px;
+        border-radius: 15px;
+        max-width: 75%;
+        word-wrap: break-word;
+        position: relative;
+    }
+    .user-message {
+        background-color: #DCF8C6;
+        border-top-right-radius: 0;
+        box-shadow: 0 1px 1px rgba(0,0,0,0.1);
+    }
+    .bot-message {
+        background-color: #FFFFFF;
+        border-top-left-radius: 0;
+        box-shadow: 0 1px 1px rgba(0,0,0,0.1);
+    }
+    .message-sender {
+        font-weight: 600;
+        font-size: 0.85rem;
+        margin-bottom: 4px;
+        color: #1E3A8A;
+    }
+    .message-content {
+        font-size: 0.95rem;
+        line-height: 1.4;
+        color: #202020;
+    }
+    .chat-form {
+        background-color: white;
+        border-radius: 10px;
+        padding: 10px;
+        margin-top: 10px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        display: flex;
+        align-items: center;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # Create a container for the chat
+    st.markdown('<div class="chat-container">', unsafe_allow_html=True)
     chat_container = st.container()
+
     with chat_container:
         if "chat_history" not in st.session_state:
             st.session_state.chat_history = []
-
+        
+        # Show welcome message if chat is empty
+        if not st.session_state.chat_history:
+            st.markdown(
+                """
+                <div style="text-align: center; padding: 20px; color: #666;">
+                    <p style="font-size: 16px; margin-bottom: 8px;">👋 Welcome to the PDF Q&A System!</p>
+                    <p style="font-size: 14px;">Ask questions about your course materials below.</p>
+                </div>
+                """, 
+                unsafe_allow_html=True
+            )
+        
+        # Display chat messages with improved styling
         for entry in st.session_state.get("chat_history", []):
             if entry["type"] == "user":
                 st.markdown(
                     f"""
-                    <div style="text-align: right; background-color: #DCF8C6; padding: 10px; border-radius: 10px; margin: 5px;">
-                        <strong>You:</strong> {entry['content']}
+                    <div class="message-container user">
+                        <div class="message-bubble user-message">
+                            <div class="message-sender">You</div>
+                            <div class="message-content">{entry['content']}</div>
+                        </div>
                     </div>
                     """,
                     unsafe_allow_html=True,
@@ -1102,17 +1304,30 @@ elif page == "User":
             elif entry["type"] == "bot":
                 st.markdown(
                     f"""
-                    <div style="text-align: left; background-color: #EDEDED; padding: 10px; border-radius: 10px; margin: 5px;">
-                        <strong>Bot:</strong> {entry['content']}
+                    <div class="message-container bot">
+                        <div class="message-bubble bot-message">
+                            <div class="message-sender">Assistant</div>
+                            <div class="message-content">{entry['content']}</div>
+                        </div>
                     </div>
                     """,
                     unsafe_allow_html=True,
                 )
 
-    # Input form for user questions
-    with st.form("question_form"):
-        question = st.text_input("Ask a question about the PDFs:", key="question")
-        submit_button = st.form_submit_button("Ask")
+    # Close the chat container
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # Input form for user questions with better styling
+    with st.form("question_form", clear_on_submit=True):
+        col1, col2 = st.columns([5, 1])
+        with col1:
+            question = st.text_input(
+                "Ask a question about the PDFs:", 
+                key="question",
+                placeholder="Type your question here..."
+            )
+        with col2:
+            submit_button = st.form_submit_button("Send", use_container_width=True)
 
     if submit_button:
         if not question.strip():
@@ -1121,7 +1336,7 @@ elif page == "User":
             # Add the user question to the chat history
             st.session_state.chat_history.append({"type": "user", "content": question})
 
-            with st.spinner("🤖 Generating response..."):
+            with st.spinner("Generating response..."):
                 try:
                     # Call the ask_question method
                     response = st.session_state.qa_agent.ask_question(question)
