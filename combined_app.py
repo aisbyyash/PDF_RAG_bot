@@ -1,6 +1,6 @@
-__import__('pysqlite3')
-import sys
-sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+# __import__('pysqlite3')
+# import sys
+# sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 import streamlit as st
 import os
 import json
@@ -524,6 +524,16 @@ if page == "Admin":
     elif admin_action == "Manage PDFs":
         st.header("📂 Upload PDFs")
         
+        # Force refresh of PDF lists when needed
+        if "refresh_pdf_lists" not in st.session_state:
+            st.session_state.refresh_pdf_lists = True
+            
+        # Only scan directories when needed to avoid performance issues
+        if st.session_state.refresh_pdf_lists:
+            teacher_pdfs = get_pdfs_in_folder(teacher_folder)
+            student_pdfs = get_pdfs_in_folder(student_folder)
+            st.session_state.refresh_pdf_lists = False
+        
         # Display current content summary
         col1, col2 = st.columns(2)
         
@@ -550,93 +560,186 @@ if page == "Admin":
                 st.info("No student PDFs uploaded for this class.")
         
         # Upload Section
-        st.subheader("📤 Upload a New PDF")
-        upload_destination = st.radio("Upload PDF to:", ["Teacher", "Student", "Both"], horizontal=True)
+        st.subheader("📤 Upload New PDFs")
+        upload_destination = st.radio("Upload PDFs to:", ["Teacher", "Student", "Both"], horizontal=True)
         
         # Visual separator
         st.markdown("---")
         
-        uploaded_pdf = st.file_uploader("Choose a PDF to Upload", type=["pdf"])
-        upload_status = st.empty()
+        # Initialize session state variables for uploader
+        if "uploader_key" not in st.session_state:
+            st.session_state.uploader_key = f"pdf_uploader_{int(time.time())}"
+        if "processing_files" not in st.session_state:
+            st.session_state.processing_files = False
+        if "processed_files" not in st.session_state:
+            st.session_state.processed_files = set()
+        if "upload_status_messages" not in st.session_state:
+            st.session_state.upload_status_messages = []
         
-        # Prevent infinite rerun by tracking upload state
-        if "upload_complete" not in st.session_state:
-            st.session_state.upload_complete = False
+        # Reset the uploader completely
+        def reset_uploader():
+            st.session_state.uploader_key = f"pdf_uploader_{int(time.time())}"
+            st.session_state.processing_files = False
+            st.session_state.processed_files = set()
+            st.session_state.upload_status_messages = []
+            st.session_state.refresh_pdf_lists = True
         
-        # Progress bar placeholder
-        progress_bar = st.empty()
+        # Clear error messages when needed
+        status_container = st.container()
         
-        if uploaded_pdf is not None and not st.session_state.upload_complete:
-            # Read the file content once
-            pdf_content = uploaded_pdf.read()
+        # File uploader with support for multiple files
+        uploaded_pdfs = st.file_uploader("Choose PDFs to Upload", type=["pdf"], accept_multiple_files=True, key=st.session_state.uploader_key)
+        
+        # Skip previously processed files
+        new_pdfs = [pdf for pdf in uploaded_pdfs if pdf.name not in st.session_state.processed_files]
+        
+        # Detect when new files are added and clear previous error messages
+        if new_pdfs and not st.session_state.processing_files:
+            st.session_state.upload_status_messages = []
+            st.session_state.processing_files = True
+        
+        # Process new files if any are available
+        if new_pdfs and st.session_state.processing_files:
+            # Placeholders for progress and status
+            overall_progress = st.progress(0, text="Preparing to upload files...")
             
-            destination_folders = []
-            if upload_destination in ["Teacher", "Both"]:
-                destination_folders.append(teacher_folder)
-            if upload_destination in ["Student", "Both"]:
-                destination_folders.append(student_folder)
+            # Track success and failures
+            successful_files = []
+            failed_files = []
+            skipped_files = []
             
-            # Show a progress bar for the overall process
-            progress_bar.progress(0, text="Starting upload process...")
-            time.sleep(0.5)
+            # Process each PDF
+            for file_index, uploaded_pdf in enumerate(new_pdfs):
+                # Update overall progress
+                overall_file_progress = (file_index / len(new_pdfs)) * 100
+                overall_progress.progress(int(overall_file_progress), text=f"Processing file {file_index+1} of {len(new_pdfs)}: {uploaded_pdf.name}")
+                
+                # Create a status container for this file
+                file_status = st.empty()
+                file_status.info(f"⏳ Processing {uploaded_pdf.name}...")
+                
+                # Read the file content once
+                pdf_content = uploaded_pdf.read()
+                
+                destination_folders = []
+                if upload_destination in ["Teacher", "Both"]:
+                    destination_folders.append(teacher_folder)
+                if upload_destination in ["Student", "Both"]:
+                    destination_folders.append(student_folder)
+                
+                # Track temporary file paths for cleanup in case of failure
+                temp_files = []
+                file_success = True
+                
+                try:
+                    for folder_index, folder in enumerate(destination_folders):
+                        pdf_path = os.path.join(folder, uploaded_pdf.name)
+                        role = "teacher" if folder == teacher_folder else "student"
+                        
+                        # Check if file already exists
+                        if os.path.exists(pdf_path):
+                            file_status.warning(f"⚠️ The file '{uploaded_pdf.name}' already exists in {role} folder. Skipping.")
+                            if uploaded_pdf.name not in skipped_files:
+                                skipped_files.append(uploaded_pdf.name)
+                            continue
+                        
+                        # Write the content to the file
+                        with open(pdf_path, "wb") as f:
+                            f.write(pdf_content)
+                        
+                        # Add to list of temporary files for cleanup in case of failure
+                        temp_files.append(pdf_path)
+                        
+                        # Process PDFs and store in ChromaDB collections
+                        collection_name = get_collection_name(selected_class, role)
+                        file_status.info(f"⏳ Indexing {uploaded_pdf.name} for {role}... (This may take a while)")
+                        
+                        process_result = process_all_pdfs(folder, collection_name)
+                        
+                        # If processing failed, raise an exception
+                        if not process_result:
+                            raise Exception(f"Failed to process {uploaded_pdf.name} for {role}")
+                    
+                    # All destinations processed successfully
+                    if len(temp_files) > 0:  # At least one file was uploaded (not skipped)
+                        file_status.success(f"✅ Successfully processed {uploaded_pdf.name}")
+                        successful_files.append(uploaded_pdf.name)
+                    elif uploaded_pdf.name not in skipped_files:
+                        file_status.error(f"❌ No destinations were valid for {uploaded_pdf.name}")
+                        failed_files.append(uploaded_pdf.name)
+                        file_success = False
+                    
+                except Exception as e:
+                    # Cleanup temporary files on failure
+                    for temp_file in temp_files:
+                        if os.path.exists(temp_file):
+                            try:
+                                os.remove(temp_file)
+                            except Exception as cleanup_error:
+                                st.error(f"Error removing temporary file {temp_file}: {cleanup_error}")
+                    
+                    # Show error message
+                    error_message = str(e)
+                    file_status.error(f"❌ Error processing {uploaded_pdf.name}: {error_message}")
+                    failed_files.append(uploaded_pdf.name)
+                    file_success = False
+                
+                # Mark file as processed regardless of success/failure
+                st.session_state.processed_files.add(uploaded_pdf.name)
             
-            success_count = 0
-            skip_count = 0
+            # Update overall status
+            overall_progress.progress(100, text="Processing complete")
             
-            for i, folder in enumerate(destination_folders):
-                pdf_path = os.path.join(folder, uploaded_pdf.name)
-                role = "teacher" if folder == teacher_folder else "student"
-                
-                # Update progress to show we're processing this folder
-                progress_percent = (i / len(destination_folders)) * 0.4  # First 40% is for preparation
-                progress_bar.progress(progress_percent, text=f"Preparing to upload to {role} collection...")
-                time.sleep(0.5)
-                
-                # Prevent duplicate uploads
-                if os.path.exists(pdf_path):
-                    upload_status.warning(f"⚠️ The file '{uploaded_pdf.name}' already exists in {role} folder. Skipping upload.")
-                    skip_count += 1
-                    continue
-                
-                # Write the content to the file
-                with open(pdf_path, "wb") as f:
-                    f.write(pdf_content)
-                
-                # Show we've written the file
-                progress_percent = 0.4 + (i / len(destination_folders)) * 0.2  # Next 20% for file writing
-                progress_bar.progress(progress_percent, text=f"Uploaded file to {role} folder...")
-                
-                # Processing message
-                upload_status.info(f"⏳ Processing {uploaded_pdf.name} for {role}... (This may take a while)")
-                
-                # Process PDFs and store in ChromaDB collections
-                collection_name = get_collection_name(selected_class, role)
-                process_result = process_all_pdfs(folder, collection_name)
-                
-                # Show processing completion
-                progress_percent = 0.6 + (i / len(destination_folders)) * 0.4  # Final 40% for processing
-                progress_bar.progress(progress_percent, text=f"Processing {role} collection...")
-                
-                if process_result:
-                    success_count += 1
+            # Add summary to status messages
+            if successful_files:
+                st.session_state.upload_status_messages.append({
+                    "type": "success",
+                    "message": f"✅ Successfully processed {len(successful_files)} file(s): {', '.join(successful_files)}"
+                })
             
-            # Complete the progress bar
-            progress_bar.progress(100, text="Upload and processing complete!")
+            if failed_files:
+                st.session_state.upload_status_messages.append({
+                    "type": "error",
+                    "message": f"❌ Failed to process {len(failed_files)} file(s): {', '.join(failed_files)}"
+                })
             
-            # Final status message
-            if success_count > 0:
-                upload_status.success(f"✅ Successfully uploaded and processed {uploaded_pdf.name} for {success_count} collection(s). {skip_count} collection(s) skipped.")
-            else:
-                upload_status.error("❌ No files were uploaded. Please check the error messages above.")
+            if skipped_files:
+                st.session_state.upload_status_messages.append({
+                    "type": "warning",
+                    "message": f"⚠️ Skipped {len(skipped_files)} existing file(s): {', '.join(skipped_files)}"
+                })
             
-            # Set upload complete flag to prevent rerun
-            st.session_state.upload_complete = True
+            # Reset processing flag
+            st.session_state.processing_files = False
             
-            # Add a button to reset the uploader
-            if st.button("Upload Another PDF"):
-                st.session_state.upload_complete = False
+            # Mark that we need to refresh the PDF lists
+            st.session_state.refresh_pdf_lists = True
+            
+            # Force rerun to update the UI
+            st.rerun()
+        
+        # Display status messages
+        with status_container:
+            for msg in st.session_state.upload_status_messages:
+                if msg["type"] == "success":
+                    st.success(msg["message"])
+                elif msg["type"] == "error":
+                    st.error(msg["message"])
+                elif msg["type"] == "warning":
+                    st.warning(msg["message"])
+                elif msg["type"] == "info":
+                    st.info(msg["message"])
+        
+        # Add a button to reset the uploader if there are any processed files
+        if st.session_state.processed_files:
+            if st.button("Reset Uploader"):
+                reset_uploader()
                 st.rerun()
-    
+                
+        # Force rerun to update the list of PDFs if they were changed
+        if st.session_state.refresh_pdf_lists:
+            st.rerun()
+        
     # -----------------------------
     # DELETE PDFs SECTION
     # -----------------------------
